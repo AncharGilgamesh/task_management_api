@@ -7,6 +7,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import hash_password
+from app.db.errors import is_unique_violation
 from app.db.session import get_db
 from app.models import User
 from app.schemas import UserCreate, UserResponse
@@ -17,15 +18,29 @@ DbSession = Annotated[AsyncSession, Depends(get_db)]
 
 EMAIL_ALREADY_REGISTERED = "User with this email already exists"
 
+USERS_EMAIL_UNIQUE_CONSTRAINT = "uq_users_email"
+
 
 @router.post(
     "/register",
     response_model=UserResponse,
     status_code=status.HTTP_201_CREATED,
+    responses={
+        status.HTTP_409_CONFLICT: {
+            "description": "Пользователь с таким email уже зарегистрирован",
+            "content": {
+                "application/json": {"example": {"detail": EMAIL_ALREADY_REGISTERED}},
+            },
+        },
+    },
 )
 async def register(payload: UserCreate, db: DbSession) -> User:
-    existing = await db.execute(select(User.id).where(User.email == payload.email))
-    if existing.scalar_one_or_none() is not None:
+    result = await db.execute(select(User.id).where(User.email == payload.email))
+    email_taken = result.scalar_one_or_none() is not None
+
+    await db.rollback()
+
+    if email_taken:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=EMAIL_ALREADY_REGISTERED)
 
     hashed_password = await asyncio.to_thread(hash_password, payload.password)
@@ -38,9 +53,10 @@ async def register(payload: UserCreate, db: DbSession) -> User:
     db.add(user)
     try:
         await db.commit()
-    except IntegrityError:
-        # Гонка: другой запрос успел зарегистрировать тот же email между проверкой и вставкой.
+    except IntegrityError as exc:
         await db.rollback()
+        if not is_unique_violation(exc, USERS_EMAIL_UNIQUE_CONSTRAINT):
+            raise
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=EMAIL_ALREADY_REGISTERED,
