@@ -1,10 +1,11 @@
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Path, status
+from fastapi import APIRouter, HTTPException, Path, Query, status
+from sqlalchemy import select
 
 from app.api.deps import CurrentUser, DbSession
 from app.models import Project, ProjectMember, Task, TaskStatusHistory, User
-from app.models.enums import TaskStatus
+from app.models.enums import TaskPriority, TaskStatus
 from app.schemas.task import TaskCreate, TaskResponse
 from app.services.project_access import (
     NOT_ENOUGH_PERMISSIONS,
@@ -17,6 +18,11 @@ router = APIRouter(prefix="/projects/{project_id}/tasks", tags=["tasks"])
 
 MAX_INT32 = 2_147_483_647
 ProjectId = Annotated[int, Path(ge=1, le=MAX_INT32)]
+TaskId = Annotated[int, Path(ge=1, le=MAX_INT32)]
+AssigneeFilter = Annotated[int | None, Query(ge=1, le=MAX_INT32)]
+
+TASK_NOT_FOUND = "Task not found"
+ASSIGNEE_FILTER_CONFLICT = "assignee_id cannot be combined with unassigned=true"
 
 ASSIGNEE_NOT_FOUND = "Assignee not found"
 ASSIGNEE_NOT_ALLOWED = "User cannot be assigned to this project"
@@ -100,4 +106,64 @@ async def create_task(
         await db.rollback()
         raise
     await db.refresh(task)
+    return task
+
+
+@router.get(
+    "",
+    response_model=list[TaskResponse],
+    responses={
+        status.HTTP_401_UNAUTHORIZED: _UNAUTHORIZED,
+        status.HTTP_404_NOT_FOUND: _PROJECT_NOT_FOUND,
+    },
+)
+async def list_tasks(
+    project_id: ProjectId,
+    current_user: CurrentUser,
+    db: DbSession,
+    status_filter: Annotated[TaskStatus | None, Query(alias="status")] = None,
+    priority: TaskPriority | None = None,
+    assignee_id: AssigneeFilter = None,
+    unassigned: bool = False,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> list[Task]:
+    project = await get_project_or_error(db, project_id, current_user, required=Permission.READ)
+    if unassigned and assignee_id is not None:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=ASSIGNEE_FILTER_CONFLICT)
+
+    query = select(Task).where(Task.project_id == project.id)
+    if status_filter is not None:
+        query = query.where(Task.status == status_filter)
+    if priority is not None:
+        query = query.where(Task.priority == priority)
+    if unassigned:
+        query = query.where(Task.assignee_id.is_(None))
+    elif assignee_id is not None:
+        query = query.where(Task.assignee_id == assignee_id)
+    result = await db.execute(query.order_by(Task.id.desc()).limit(limit).offset(offset))
+    return list(result.scalars().all())
+
+
+@router.get(
+    "/{task_id}",
+    response_model=TaskResponse,
+    responses={
+        status.HTTP_401_UNAUTHORIZED: _UNAUTHORIZED,
+        status.HTTP_404_NOT_FOUND: {
+            "description": "Нет доступа к проекту (Project not found) или задача не в этом проекте (Task not found)",
+            "content": {"application/json": {"example": {"detail": TASK_NOT_FOUND}}},
+        },
+    },
+)
+async def get_task(
+    project_id: ProjectId,
+    task_id: TaskId,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> Task:
+    project = await get_project_or_error(db, project_id, current_user, required=Permission.READ)
+    task = await db.get(Task, task_id)
+    if task is None or task.project_id != project.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=TASK_NOT_FOUND)
     return task
