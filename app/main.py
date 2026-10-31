@@ -7,6 +7,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.auth import router as auth_router
 from app.db.session import engine, get_db
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -29,6 +30,8 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+app.include_router(auth_router)
 
 
 @app.get("/")
