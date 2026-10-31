@@ -12,6 +12,7 @@ NOT_ENOUGH_PERMISSIONS = "Not enough permissions"
 
 
 class AccessLevel(IntEnum):
+    """Чем больше число, тем шире права."""
 
     VIEWER = 1
     MEMBER = 2
@@ -21,12 +22,14 @@ class AccessLevel(IntEnum):
 
 class Permission(StrEnum):
     READ = "read"
+    CONTRIBUTE = "contribute"
     UPDATE = "update"
     DELETE = "delete"
 
 
 REQUIRED_LEVEL: dict[Permission, AccessLevel] = {
     Permission.READ: AccessLevel.VIEWER,
+    Permission.CONTRIBUTE: AccessLevel.MEMBER,
     Permission.UPDATE: AccessLevel.ADMIN,
     Permission.DELETE: AccessLevel.OWNER,
 }
@@ -43,6 +46,7 @@ def resolve_access_level(
     user: User,
     member_role: ProjectRole | None,
 ) -> AccessLevel | None:
+    """Владелец по owner_id, остальные по роли. None — доступа нет."""
     if project.owner_id == user.id:
         return AccessLevel.OWNER
     if member_role is None:
@@ -57,7 +61,7 @@ async def get_project_or_error(
     *,
     required: Permission,
 ) -> Project:
-
+    """404, если проекта нет или пользователь к нему не допущен. 403, если права есть, но их мало."""
     result = await db.execute(
         select(Project, ProjectMember.role)
         .outerjoin(
@@ -80,7 +84,7 @@ async def get_project_or_error(
 
 
 def actor_level_for_membership_changes(project: Project, user: User) -> AccessLevel:
-
+    """Кто меняет участников: владелец или admin. Остальные сюда не доходят."""
     member_role = None if project.owner_id == user.id else ProjectRole.ADMIN
     level = resolve_access_level(project, user, member_role)
     if level is None or level < REQUIRED_LEVEL[Permission.UPDATE]:
@@ -89,5 +93,6 @@ def actor_level_for_membership_changes(project: Project, user: User) -> AccessLe
 
 
 def require_outranks(actor_level: AccessLevel, *subject_levels: AccessLevel) -> None:
+    """Менять можно только того, у кого уровень ниже."""
     if any(actor_level <= subject for subject in subject_levels):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=NOT_ENOUGH_PERMISSIONS)

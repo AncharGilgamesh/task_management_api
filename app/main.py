@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.auth import router as auth_router
 from app.api.project_members import router as project_members_router
 from app.api.projects import router as projects_router
+from app.api.tasks import router as tasks_router
 from app.core.exceptions import validation_exception_handler
 from app.db.session import engine, get_db
 from sqlalchemy.exc import SQLAlchemyError
@@ -39,6 +40,7 @@ app.add_exception_handler(RequestValidationError, validation_exception_handler)
 app.include_router(auth_router)
 app.include_router(projects_router)
 app.include_router(project_members_router)
+app.include_router(tasks_router)
 
 
 @app.get("/")
