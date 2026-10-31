@@ -77,3 +77,17 @@ async def get_project_or_error(
     if level < REQUIRED_LEVEL[required]:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=NOT_ENOUGH_PERMISSIONS)
     return project
+
+
+def actor_level_for_membership_changes(project: Project, user: User) -> AccessLevel:
+
+    member_role = None if project.owner_id == user.id else ProjectRole.ADMIN
+    level = resolve_access_level(project, user, member_role)
+    if level is None or level < REQUIRED_LEVEL[Permission.UPDATE]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=NOT_ENOUGH_PERMISSIONS)
+    return level
+
+
+def require_outranks(actor_level: AccessLevel, *subject_levels: AccessLevel) -> None:
+    if any(actor_level <= subject for subject in subject_levels):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=NOT_ENOUGH_PERMISSIONS)
