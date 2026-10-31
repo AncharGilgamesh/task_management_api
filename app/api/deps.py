@@ -1,7 +1,7 @@
 from typing import Annotated
 
 from fastapi import Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.tokens import InvalidTokenError, decode_access_token
@@ -10,12 +10,18 @@ from app.models import User
 
 DbSession = Annotated[AsyncSession, Depends(get_db)]
 
-# Если заголовка Authorization: Bearer ... нет, схема сама отвечает 401 + WWW-Authenticate.
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+# Логин принимает JSON, форма Swagger с username/password к нему не подходит.
+bearer_scheme = HTTPBearer(
+    auto_error=False,
+    bearerFormat="JWT",
+    description=(
+        "Access token из POST /auth/login. Вставьте сам JWT, без префикса Bearer: "
+        "Swagger добавит его сам."
+    ),
+)
 
 
 def credentials_exception() -> HTTPException:
-    # Одинаковый ответ для любой причины: нет пользователя, неактивен, плохой токен.
     return HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -24,11 +30,13 @@ def credentials_exception() -> HTTPException:
 
 
 async def get_current_user(
-    token: Annotated[str, Depends(oauth2_scheme)],
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
     db: DbSession,
 ) -> User:
+    if credentials is None or not credentials.credentials:
+        raise credentials_exception()
     try:
-        user_id = decode_access_token(token)
+        user_id = decode_access_token(credentials.credentials)
     except InvalidTokenError:
         raise credentials_exception() from None
 
