@@ -1,22 +1,35 @@
 from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, StringConstraints, field_validator
+from pydantic import (
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    EmailStr,
+    Field,
+    StringConstraints,
+)
 
 FullName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)]
 
 
+def _normalize_email(value: object) -> object:
+    if isinstance(value, str):
+        return value.strip().lower()
+    return value
+
+
+NormalizedEmail = Annotated[EmailStr, BeforeValidator(_normalize_email)]
+
+
 class UserCreate(BaseModel):
-    email: EmailStr
+    email: NormalizedEmail
     full_name: FullName
     password: str = Field(min_length=8, max_length=128)
 
-    @field_validator("email", mode="before")
-    @classmethod
-    def normalize_email(cls, value: object) -> object:
-        # До валидации EmailStr: "  User@Example.COM " -> "user@example.com".
-        if isinstance(value, str):
-            return value.strip().lower()
-        return value
+
+class UserLogin(BaseModel):
+    email: NormalizedEmail
+    password: str = Field(min_length=1, max_length=128)
 
 
 class UserResponse(BaseModel):

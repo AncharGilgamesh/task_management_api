@@ -3,12 +3,13 @@ from contextlib import asynccontextmanager
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, HTTPException
-from fastapi.exceptions import RequestValidationError, validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import router as auth_router
+from app.core.exceptions import validation_exception_handler
 from app.db.session import engine, get_db
 from sqlalchemy.exc import SQLAlchemyError
 

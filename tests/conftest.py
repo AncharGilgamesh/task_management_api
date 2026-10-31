@@ -3,6 +3,10 @@ from collections.abc import AsyncIterator
 
 os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://test:test@localhost:5432/test")
 
+TEST_SECRET_KEY = "test-only-secret-key-not-for-production-0123456789"
+os.environ["SECRET_KEY"] = TEST_SECRET_KEY
+os.environ["ACCESS_TOKEN_EXPIRE_MINUTES"] = "30"
+
 import pytest  # noqa: E402
 from httpx import ASGITransport, AsyncClient  # noqa: E402
 from sqlalchemy.ext.asyncio import (  # noqa: E402
@@ -12,9 +16,11 @@ from sqlalchemy.ext.asyncio import (  # noqa: E402
 )
 from sqlalchemy.pool import StaticPool  # noqa: E402
 
+from app.core.security import hash_password  # noqa: E402
 from app.db.base import Base  # noqa: E402
 from app.db.session import get_db  # noqa: E402
 from app.main import app  # noqa: E402
+from app.models import User  # noqa: E402
 
 
 @pytest.fixture
@@ -50,3 +56,27 @@ async def client(
     async with AsyncClient(transport=transport, base_url="http://test") as async_client:
         yield async_client
     app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def create_user(session_factory: async_sessionmaker[AsyncSession]):
+
+    async def _create(
+        email: str = "alice@example.com",
+        password: str = "correct-horse-battery",
+        *,
+        is_active: bool = True,
+        hashed_password: str | None = None,
+    ) -> User:
+        async with session_factory() as session:
+            user = User(
+                email=email,
+                full_name="Alice Smith",
+                hashed_password=hashed_password or hash_password(password),
+                is_active=is_active,
+            )
+            session.add(user)
+            await session.commit()
+            return user
+
+    return _create
