@@ -13,7 +13,7 @@ from app.core.config import settings
 from app.db.base import Base
 
 # Импортируем модели, чтобы Alembic видел их metadata.
-# Пока моделей нет — добавим импорты на следующем этапе.
+import app.models  # noqa: F401
 
 config = context.config
 
