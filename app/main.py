@@ -9,6 +9,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import router as auth_router
+from app.api.projects import router as projects_router
 from app.core.exceptions import validation_exception_handler
 from app.db.session import engine, get_db
 from sqlalchemy.exc import SQLAlchemyError
@@ -35,6 +36,7 @@ app = FastAPI(
 
 app.add_exception_handler(RequestValidationError, validation_exception_handler)
 app.include_router(auth_router)
+app.include_router(projects_router)
 
 
 @app.get("/")
