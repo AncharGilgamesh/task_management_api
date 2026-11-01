@@ -12,8 +12,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-task_password}
       POSTGRES_DB: ${POSTGRES_DB:-task_management}
     ports:
-      # 127.0.0.1 и порт 5433: не занимать 5432, если на Windows уже есть свой PostgreSQL
-      # или контейнер из docker-compose.yml.
+      # 127.0.0.1 и порт 5433: не занимать 5432, если на Windows уже есть свой PostgreSQL.
       - "127.0.0.1:${POSTGRES_PORT:-5433}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -72,3 +71,4 @@ services:
 
 volumes:
   postgres_data:
+    name: task_management_api_compose_postgres_data

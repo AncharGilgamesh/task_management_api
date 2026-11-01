@@ -10,55 +10,34 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-## Настройка окружения
+## Запуск
 
-Скопируйте шаблон и при необходимости отредактируйте значения:
+Рекомендуемый способ — `compose.yaml`. PostgreSQL работает в отдельном контейнере. Сервис `migrate` применяет Alembic-миграции (`alembic upgrade head`) после готовности базы. FastAPI стартует только после успешного завершения миграций. Данные PostgreSQL хранятся в именованном томе `task_management_api_compose_postgres_data`.
+
+Старая конфигурация `docker-compose.yml` больше не поддерживается. Использовать нужно только `compose.yaml`. Старый том и уже запущенные контейнеры эта конфигурация сама не удаляет.
+
+Создайте локальный env-файл из шаблона и запустите проект:
 
 ```powershell
-Copy-Item .env.example .env
+Copy-Item .env.docker.example .env.docker
+docker compose --env-file .env.docker up --build
 ```
 
-Для локальной разработки с `docker-compose.yml` используйте:
+`.env.docker.example` содержит только демонстрационные значения для локальной разработки. Файл `.env.docker` не нужно добавлять в Git: его уже скрывает `.gitignore`.
 
-```
-DATABASE_URL=postgresql+asyncpg://task_user:task_password@localhost:5432/task_management
-DB_ECHO=false
-SECRET_KEY=<ваш секрет, см. ниже>
-ACCESS_TOKEN_EXPIRE_MINUTES=30
-```
+- Swagger: http://127.0.0.1:8000/docs
+- Health: http://127.0.0.1:8000/health
+- Проверка базы: http://127.0.0.1:8000/health/db
+- PostgreSQL с хоста: `127.0.0.1:5433`
+- Адрес базы внутри Compose для приложения: `db:5432`
 
-`DB_ECHO=true` включает логирование SQL-запросов (по умолчанию выключено).
-Файл `.env` не попадает в Git, не добавляйте в репозиторий реальные пароли и секреты.
-
-`SECRET_KEY` подписывает JWT и обязателен (минимум 32 символа, значения по умолчанию нет;
-без него приложение и Alembic не запустятся). Сгенерировать:
+`DOCKER_SECRET_KEY` в `.env.docker` подписывает JWT и обязателен (минимум 32 символа). Сгенерировать:
 
 ```powershell
 python -c "import secrets; print(secrets.token_urlsafe(48))"
 ```
 
-`ACCESS_TOKEN_EXPIRE_MINUTES` — время жизни access-токена в минутах (по умолчанию 30).
-
-## Запуск PostgreSQL
-
-```powershell
-docker compose up -d
-```
-
-PostgreSQL доступен только с локальной машины (`127.0.0.1:5432`).
-
-## Запуск приложения
-
-```powershell
-uvicorn app.main:app --reload
-```
-
-- Документация: http://127.0.0.1:8000/docs
-- Проверка приложения: `GET /health`
-- Проверка базы данных: `GET /health/db`
-- Регистрация: `POST /auth/register`
-- Вход: `POST /auth/login` (JSON `email`, `password`) возвращает `access_token`
-- Текущий пользователь: `GET /auth/me` с заголовком `Authorization: Bearer <access_token>`
+`ACCESS_TOKEN_EXPIRE_MINUTES` — время жизни access-токена в минутах (по умолчанию 30). `DB_ECHO=true` включает логирование SQL-запросов (по умолчанию выключено).
 
 ## Тесты
 
