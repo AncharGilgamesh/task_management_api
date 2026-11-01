@@ -1,0 +1,74 @@
+# Локальный запуск API и PostgreSQL.
+# Пароль в URL собирается здесь и всегда указывает на сервис db, а не на localhost.
+# Существующий .env приложения Compose подставляет только для совпадающих имён;
+# секрет контейнера задаётся отдельно как DOCKER_SECRET_KEY.
+
+services:
+  db:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-task_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-task_password}
+      POSTGRES_DB: ${POSTGRES_DB:-task_management}
+    ports:
+      # 127.0.0.1 и порт 5433: не занимать 5432, если на Windows уже есть свой PostgreSQL
+      # или контейнер из docker-compose.yml.
+      - "127.0.0.1:${POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  migrate:
+    build: .
+    image: task_management_api:local
+    command: ["alembic", "upgrade", "head"]
+    restart: "no"
+    init: true
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-task_user}:${POSTGRES_PASSWORD:-task_password}@db:5432/${POSTGRES_DB:-task_management}
+      SECRET_KEY: ${DOCKER_SECRET_KEY:-local-only-docker-secret-key-not-for-production-01}
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-30}
+      DB_ECHO: ${DB_ECHO:-false}
+    depends_on:
+      db:
+        condition: service_healthy
+
+  app:
+    build: .
+    image: task_management_api:local
+    restart: unless-stopped
+    init: true
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-task_user}:${POSTGRES_PASSWORD:-task_password}@db:5432/${POSTGRES_DB:-task_management}
+      SECRET_KEY: ${DOCKER_SECRET_KEY:-local-only-docker-secret-key-not-for-production-01}
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-30}
+      DB_ECHO: ${DB_ECHO:-false}
+    ports:
+      - "127.0.0.1:${APP_PORT:-8000}:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+
+volumes:
+  postgres_data:
