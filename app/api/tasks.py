@@ -6,7 +6,7 @@ from sqlalchemy import select
 from app.api.deps import CurrentUser, DbSession
 from app.models import Project, ProjectMember, Task, TaskStatusHistory, User
 from app.models.enums import TaskPriority, TaskStatus
-from app.schemas.task import TaskCreate, TaskResponse
+from app.schemas.task import TaskCreate, TaskResponse, TaskUpdate
 from app.services.project_access import (
     NOT_ENOUGH_PERMISSIONS,
     PROJECT_NOT_FOUND,
@@ -166,4 +166,62 @@ async def get_task(
     task = await db.get(Task, task_id)
     if task is None or task.project_id != project.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=TASK_NOT_FOUND)
+    return task
+
+
+@router.patch(
+    "/{task_id}",
+    response_model=TaskResponse,
+    responses={
+        status.HTTP_401_UNAUTHORIZED: _UNAUTHORIZED,
+        status.HTTP_403_FORBIDDEN: {
+            "description": "Недостаточно прав для изменения задачи",
+            "content": {"application/json": {"example": {"detail": NOT_ENOUGH_PERMISSIONS}}},
+        },
+        status.HTTP_404_NOT_FOUND: {
+            "description": "Нет доступа к проекту (Project not found) или задача не в этом проекте (Task not found)",
+            "content": {"application/json": {"example": {"detail": TASK_NOT_FOUND}}},
+        },
+        status.HTTP_409_CONFLICT: {
+            "description": "Пользователя нельзя назначить исполнителем",
+            "content": {"application/json": {"example": {"detail": ASSIGNEE_NOT_ALLOWED}}},
+        },
+    },
+)
+async def update_task(
+    project_id: ProjectId,
+    task_id: TaskId,
+    payload: TaskUpdate,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> Task:
+    project = await get_project_or_error(
+        db, project_id, current_user, required=Permission.CONTRIBUTE
+    )
+    task = await db.get(Task, task_id)
+    if task is None or task.project_id != project.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=TASK_NOT_FOUND)
+
+    changes = payload.model_dump(exclude_unset=True)
+    if "assignee_id" in changes and changes["assignee_id"] is not None:
+        await _ensure_assignee(db, project, changes["assignee_id"])
+
+    previous_status = task.status
+    for field, value in changes.items():
+        setattr(task, field, value)
+    if "status" in changes and changes["status"] != previous_status:
+        db.add(
+            TaskStatusHistory(
+                task_id=task.id,
+                old_status=previous_status,
+                new_status=changes["status"],
+                changed_by_id=current_user.id,
+            )
+        )
+    try:
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
+    await db.refresh(task)
     return task
