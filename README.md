@@ -1,6 +1,6 @@
 # Task Management API
 
-REST API для управления проектами и задачами (FastAPI, SQLAlchemy 2.0 Async, PostgreSQL).
+REST API для проектов и задач. Регистрация, вход, проекты и участники с ролями viewer, member, admin. Владелец хранится в `owner_id`. Чужой проект отвечает 404.
 
 ## Установка
 
@@ -8,42 +8,43 @@ REST API для управления проектами и задачами (Fas
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
+Copy-Item .env.example .env
 ```
 
-## Запуск
+В `.env` обязательны `DATABASE_URL` (`postgresql+asyncpg://`) и `SECRET_KEY` от 32 символов. `ACCESS_TOKEN_EXPIRE_MINUTES` по умолчанию 30, `DB_ECHO` по умолчанию выключен.
 
-Рекомендуемый способ — `compose.yaml`. PostgreSQL работает в отдельном контейнере. Сервис `migrate` применяет Alembic-миграции (`alembic upgrade head`) после готовности базы. FastAPI стартует только после успешного завершения миграций. Данные PostgreSQL хранятся в именованном томе `task_management_api_compose_postgres_data`.
+```powershell
+alembic upgrade head
+uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+```
 
-Старая конфигурация `docker-compose.yml` больше не поддерживается. Использовать нужно только `compose.yaml`. Старый том и уже запущенные контейнеры эта конфигурация сама не удаляет.
+`alembic.ini` сам по себе базу не указывает: адрес берётся из `DATABASE_URL`.
 
-Создайте локальный env-файл из шаблона и запустите проект:
+## Docker
 
 ```powershell
 Copy-Item .env.docker.example .env.docker
 docker compose --env-file .env.docker up --build
 ```
 
-`.env.docker.example` содержит только демонстрационные значения для локальной разработки. Файл `.env.docker` не нужно добавлять в Git: его уже скрывает `.gitignore`.
+База в сервисе `db`, миграции делает `migrate`, API поднимается после них. С хоста Postgres на `127.0.0.1:5433`. Swagger: http://127.0.0.1:8000/docs
 
-- Swagger: http://127.0.0.1:8000/docs
-- Health: http://127.0.0.1:8000/health
-- Проверка базы: http://127.0.0.1:8000/health/db
-- PostgreSQL с хоста: `127.0.0.1:5433`
-- Адрес базы внутри Compose для приложения: `db:5432`
+`DOCKER_SECRET_KEY` подписывает JWT, минимум 32 символа.
 
-`DOCKER_SECRET_KEY` в `.env.docker` подписывает JWT и обязателен (минимум 32 символа). Сгенерировать:
+## Кто что может
 
-```powershell
-python -c "import secrets; print(secrets.token_urlsafe(48))"
-```
+Viewer читает проект, задачи и историю. Member ещё создаёт и меняет задачи. Admin меняет проект, удаляет задачи и управляет viewer и member, но не назначает admin. Удалить проект может только владелец. Не хватает прав — 403.
 
-`ACCESS_TOKEN_EXPIRE_MINUTES` — время жизни access-токена в минутах (по умолчанию 30). `DB_ECHO=true` включает логирование SQL-запросов (по умолчанию выключено).
+Новая задача всегда `todo`. Смена статуса пишется в историю. Исполнителем можно поставить только активного участника этого проекта.
 
 ## Тесты
 
 ```powershell
-pytest
+python -m pytest
 ```
 
-Тесты не требуют запущенной PostgreSQL: зависимость `get_db` подменяется, а тесты аутентификации
-используют SQLite в памяти и отдельный тестовый `SECRET_KEY` (см. `tests/conftest.py`).
+Postgres для этого не нужен, база в тестах — SQLite в памяти.
+
+## CI
+
+Workflow `.github/workflows/tests.yml` запускает pytest на push в `main` и на pull request.
