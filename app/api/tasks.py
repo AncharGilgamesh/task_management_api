@@ -1,12 +1,12 @@
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Path, Query, status
+from fastapi import APIRouter, HTTPException, Path, Query, Response, status
 from sqlalchemy import select
 
 from app.api.deps import CurrentUser, DbSession
 from app.models import Project, ProjectMember, Task, TaskStatusHistory, User
 from app.models.enums import TaskPriority, TaskStatus
-from app.schemas.task import TaskCreate, TaskResponse, TaskUpdate
+from app.schemas.task import TaskCreate, TaskResponse, TaskStatusHistoryResponse, TaskUpdate
 from app.services.project_access import (
     NOT_ENOUGH_PERMISSIONS,
     PROJECT_NOT_FOUND,
@@ -39,6 +39,7 @@ _FORBIDDEN = {
 
 
 async def _ensure_assignee(db: DbSession, project: Project, assignee_id: int | None) -> None:
+    """Исполнитель пустой, либо активный владелец или участник проекта."""
     if assignee_id is None:
         return
     user = await db.get(User, assignee_id)
@@ -225,3 +226,67 @@ async def update_task(
         raise
     await db.refresh(task)
     return task
+
+
+@router.delete(
+    "/{task_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={
+        status.HTTP_401_UNAUTHORIZED: _UNAUTHORIZED,
+        status.HTTP_403_FORBIDDEN: {
+            "description": "Недостаточно прав для удаления задачи",
+            "content": {"application/json": {"example": {"detail": NOT_ENOUGH_PERMISSIONS}}},
+        },
+        status.HTTP_404_NOT_FOUND: {
+            "description": "Нет доступа к проекту (Project not found) или задача не в этом проекте (Task not found)",
+            "content": {"application/json": {"example": {"detail": TASK_NOT_FOUND}}},
+        },
+    },
+)
+async def delete_task(
+    project_id: ProjectId,
+    task_id: TaskId,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> Response:
+    # Удаление задачи — admin и владелец. DELETE в правах проекта значит удалить весь проект.
+    project = await get_project_or_error(
+        db, project_id, current_user, required=Permission.UPDATE
+    )
+    task = await db.get(Task, task_id)
+    if task is None or task.project_id != project.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=TASK_NOT_FOUND)
+
+    await db.delete(task)
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get(
+    "/{task_id}/history",
+    response_model=list[TaskStatusHistoryResponse],
+    responses={
+        status.HTTP_401_UNAUTHORIZED: _UNAUTHORIZED,
+        status.HTTP_404_NOT_FOUND: {
+            "description": "Нет доступа к проекту (Project not found) или задача не в этом проекте (Task not found)",
+            "content": {"application/json": {"example": {"detail": TASK_NOT_FOUND}}},
+        },
+    },
+)
+async def list_task_history(
+    project_id: ProjectId,
+    task_id: TaskId,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> list[TaskStatusHistory]:
+    project = await get_project_or_error(db, project_id, current_user, required=Permission.READ)
+    task = await db.get(Task, task_id)
+    if task is None or task.project_id != project.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=TASK_NOT_FOUND)
+
+    result = await db.execute(
+        select(TaskStatusHistory)
+        .where(TaskStatusHistory.task_id == task.id)
+        .order_by(TaskStatusHistory.changed_at.asc(), TaskStatusHistory.id.asc())
+    )
+    return list(result.scalars().all())
