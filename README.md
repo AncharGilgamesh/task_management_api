@@ -27,7 +27,7 @@ Copy-Item .env.docker.example .env.docker
 docker compose --env-file .env.docker up --build
 ```
 
-База в сервисе `db`, миграции делает `migrate`, API поднимается после них. С хоста Postgres на `127.0.0.1:5433`. Swagger: http://127.0.0.1:8000/docs
+База в сервисе `db`, миграции делает `migrate`, API поднимается после них. Файл `.env.docker` в git не кладётся. С хоста Postgres на `127.0.0.1:5433`. Swagger: http://127.0.0.1:8000/docs
 
 `DOCKER_SECRET_KEY` подписывает JWT, минимум 32 символа.
 
@@ -43,7 +43,7 @@ Viewer читает проект, задачи и историю. Member ещё 
 python -m pytest
 ```
 
-Postgres для этого не нужен, база в тестах — SQLite в памяти.
+Postgres для этого не нужен. Фикстура `client` даёт каждому тесту свою SQLite в памяти.
 
 ## CI
 
